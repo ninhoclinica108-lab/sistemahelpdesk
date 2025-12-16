@@ -899,27 +899,99 @@ const CreateTicket = ({ currentUser, units, sectors, problems, addTicket, assets
   );
 };
 
-// --- PLACEHOLDER MANAGERS (Simplified for length) ---
-const TicketManager = ({ tickets, deleteTicket }: any) => (
-  <div className="space-y-6">
-    <div className="flex justify-between items-center"><h1 className="text-2xl font-bold text-gray-800 dark:text-white">Gerenciar OS</h1><button className="btn-primary">+ Nova OS</button></div>
-    <div className="card overflow-hidden">
-       <table className="w-full text-left">
-          <thead className="bg-gray-50 dark:bg-gray-700/50"><tr><th className="p-4 text-xs font-bold uppercase text-gray-500">ID</th><th className="p-4 text-xs font-bold uppercase text-gray-500">Título</th><th className="p-4 text-xs font-bold uppercase text-gray-500">Status</th><th className="p-4 text-xs font-bold uppercase text-gray-500">Ações</th></tr></thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-             {tickets.map((t:Ticket) => (
-                <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                   <td className="p-4 font-mono text-primary-600 dark:text-primary-400">#{t.id.substr(0,4)}</td>
-                   <td className="p-4 text-gray-900 dark:text-white font-medium">{t.title}</td>
-                   <td className="p-4"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded font-bold">{t.status}</span></td>
-                   <td className="p-4 flex gap-2"><button className="btn-icon"><Edit2 size={16}/></button><button onClick={() => deleteTicket(t.id)} className="btn-icon text-red-500 hover:text-red-600"><Trash2 size={16}/></button></td>
+// --- RESTORED TICKET MANAGER ---
+const TicketManager = ({ tickets, updateTicket, addTicket, deleteTicket, currentUser }: any) => {
+  const [showCreate, setShowCreate] = useState(false);
+
+  const handleStatusChange = (id: string, newStatus: TicketStatus) => {
+    const ticket = tickets.find((t: Ticket) => t.id === id);
+    if (ticket) {
+        updateTicket({ ...ticket, status: newStatus, updatedAt: new Date().toISOString() });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Gerenciar OS</h1>
+        <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
+            <Plus size={20} /> Nova OS
+        </button>
+      </div>
+      
+      <div className="card overflow-hidden">
+         <table className="w-full text-left">
+            <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
+                <tr>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">ID</th>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">Solicitante</th>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">Título</th>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">Prioridade</th>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">Status</th>
+                    <th className="p-4 text-xs font-bold uppercase text-gray-500">Ações</th>
                 </tr>
-             ))}
-          </tbody>
-       </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+               {tickets.map((t:Ticket) => (
+                  <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                     <td className="p-4 font-mono text-primary-600 dark:text-primary-400 text-sm">#{t.id.substr(0,4)}</td>
+                     <td className="p-4 text-gray-600 dark:text-gray-300 text-sm">{t.requesterId}</td>
+                     <td className="p-4 text-gray-900 dark:text-white font-medium">{t.title}</td>
+                     <td className="p-4">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            t.priority === TicketPriority.CRITICAL ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                            t.priority === TicketPriority.HIGH ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                            'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                        }`}>{t.priority}</span>
+                     </td>
+                     <td className="p-4">
+                        <select 
+                            value={t.status}
+                            onChange={(e) => handleStatusChange(t.id, e.target.value as TicketStatus)}
+                            className={`text-xs px-2 py-1 rounded font-bold border-none outline-none cursor-pointer appearance-none ${
+                                t.status === TicketStatus.OPEN ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300' :
+                                t.status === TicketStatus.IN_PROGRESS ? 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300' :
+                                t.status === TicketStatus.CLOSED ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' :
+                                'bg-gray-100 text-gray-700'
+                            }`}
+                        >
+                            {Object.values(TicketStatus).map(s => <option key={s} value={s} className="bg-white text-gray-900">{s}</option>)}
+                        </select>
+                     </td>
+                     <td className="p-4 flex gap-2">
+                         <button className="btn-icon"><Edit2 size={16}/></button>
+                         <button onClick={() => deleteTicket(t.id)} className="btn-icon text-red-500 hover:text-red-600"><Trash2 size={16}/></button>
+                     </td>
+                  </tr>
+               ))}
+            </tbody>
+         </table>
+      </div>
+      
+      {showCreate && (
+          <Modal title="Nova OS Avulsa" onClose={() => setShowCreate(false)}>
+              <div className="text-center p-4">
+                  <p className="mb-4 text-gray-600 dark:text-gray-300">Criação rápida de chamado administrativo.</p>
+                  <button onClick={() => {
+                      addTicket({
+                          id: Math.random().toString(36).substr(2,9),
+                          title: 'Nova OS Avulsa',
+                          description: 'Criada pelo admin',
+                          status: TicketStatus.OPEN,
+                          priority: TicketPriority.MEDIUM,
+                          requesterId: currentUser.id,
+                          unitId: currentUser.unitId || '1',
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString()
+                      });
+                      setShowCreate(false);
+                  }} className="btn-primary w-full">Confirmar Criação</button>
+              </div>
+          </Modal>
+      )}
     </div>
-  </div>
-);
+  );
+}
 
 const AdminDashboard = ({tickets}: any) => (
   <div className="space-y-6">
