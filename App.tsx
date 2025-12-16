@@ -115,6 +115,20 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Helper to set fallback user from auth session only
+  const setFallbackUser = async (userId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.id === userId) {
+          setCurrentUser({
+              id: userId,
+              name: user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
+              email: user.email || '',
+              role: Role.USER, // Default to USER if DB is missing
+              unitId: ''
+          });
+      }
+  };
+
   const fetchUserProfile = async (userId: string) => {
     try {
         const { data, error } = await supabase
@@ -123,18 +137,63 @@ export default function App() {
             .eq('id', userId)
             .single();
 
-        if (error) throw error;
+        if (error) {
+            // Check for missing table error specifically
+            // 'Could not find the table' or code '42P01' means DB is empty/not setup
+            const isTableMissing = error.message?.includes('Could not find the table') || error.code === '42P01';
+            
+            if (isTableMissing) {
+                console.warn("Table 'profiles' not found. Using fallback auth data.");
+                await setFallbackUser(userId);
+                return; // Return early to avoid throwing error
+            }
+
+            if (error.code === 'PGRST116') {
+                // Table exists, but row missing (User exists in Auth but not in Profiles table)
+                // Try to auto-create profile
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user && user.id === userId) {
+                    const fallbackName = user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário';
+                    const fallbackEmail = user.email || '';
+                    
+                    const { error: insertError } = await supabase
+                        .from('profiles')
+                        .insert([{
+                            id: userId,
+                            name: fallbackName,
+                            email: fallbackEmail,
+                            role: 'USER'
+                        }]);
+
+                    if (!insertError) {
+                        setCurrentUser({
+                            id: userId,
+                            name: fallbackName,
+                            email: fallbackEmail,
+                            role: Role.USER,
+                            unitId: ''
+                        });
+                        return;
+                    }
+                }
+            }
+            // If it's not a missing table or missing row we can handle, throw it
+            throw error;
+        }
+
         if (data) {
             setCurrentUser({
                 id: data.id,
                 name: data.name || 'Usuário',
                 email: data.email,
-                role: data.role as Role,
+                role: (data.role as Role) || Role.USER,
                 unitId: data.unit_id
             });
         }
-    } catch (error) {
-        console.error("Error fetching profile:", error);
+    } catch (error: any) {
+        console.error("Error fetching profile:", error.message || error);
+        // Ensure user can still log in even if profile fetch fails completely
+        await setFallbackUser(userId);
     }
   };
 
@@ -149,7 +208,15 @@ export default function App() {
           }
 
           const { data, error } = await query;
-          if (error) throw error;
+          if (error) {
+             // If table doesn't exist, we just set empty tickets and suppress error
+             if (error.message?.includes('Could not find the table') || error.code === '42P01') {
+                console.warn("Tickets table missing, showing empty list.");
+                setTickets([]);
+                return;
+             }
+             throw error;
+          }
           
           if (data) {
               const formattedTickets: Ticket[] = data.map((t: any) => ({
@@ -174,16 +241,25 @@ export default function App() {
 
   const fetchUsers = async () => {
       if (currentUser?.role !== Role.ADMIN) return;
-      const { data } = await supabase.from('profiles').select('*');
-      if (data) {
-          const formattedUsers: User[] = data.map((u: any) => ({
-              id: u.id,
-              name: u.name,
-              email: u.email,
-              role: u.role,
-              unitId: u.unit_id
-          }));
-          setUsers(formattedUsers);
+      try {
+        const { data, error } = await supabase.from('profiles').select('*');
+        if (error) throw error;
+        if (data) {
+            const formattedUsers: User[] = data.map((u: any) => ({
+                id: u.id,
+                name: u.name,
+                email: u.email,
+                role: u.role,
+                unitId: u.unit_id
+            }));
+            setUsers(formattedUsers);
+        }
+      } catch (e: any) {
+        // Suppress missing table error
+        if (e.message?.includes('Could not find the table') || e.code === '42P01') {
+            return;
+        }
+        console.error("Error fetching users list", e);
       }
   };
 
@@ -248,9 +324,13 @@ export default function App() {
             if (currentUser?.role === Role.ADMIN) playNotificationSound();
             else setTimeout(() => playNotificationSound(), 500); 
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error creating ticket:", error);
-        alert("Erro ao criar chamado.");
+        if (error.message?.includes('Could not find the table') || error.code === '42P01') {
+             alert("Erro: O banco de dados ainda não foi configurado (Tabela 'tickets' inexistente). Execute o SQL no Supabase.");
+        } else {
+             alert("Erro ao criar chamado.");
+        }
     }
   };
 
