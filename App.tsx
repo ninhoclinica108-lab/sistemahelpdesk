@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
+import { supabase } from './supabaseClient';
 import { 
   Ticket, User, Unit, Asset, Role, TicketStatus, TicketPriority, CommonProblem, ChatMessage, Sector, RemoteAccess
 } from './types';
 import { 
   LayoutDashboard, Ticket as TicketIcon, Users, FileBarChart, MonitorSmartphone, 
   Building2, MessageSquare, Sun, Moon, LogOut, Package, ShieldCheck, AlertCircle, 
-  Menu, X, Trash2, Search, Edit2, Plus, Copy, Eye, EyeOff, Printer, Download, Layers, Monitor, Server, FileText, Settings
+  Menu, X, Trash2, Search, Edit2, Plus, Copy, Eye, EyeOff, Printer, Download, Layers, Monitor, Server, FileText, Settings, Loader2
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell 
 } from 'recharts';
 import { formatDateBR, generateCSV, playNotificationSound } from './utils';
 
-// --- MOCK DATA ---
+// --- MOCK DATA FOR STATIC LISTS ---
 const INITIAL_UNITS: Unit[] = [
   { id: '1', name: 'CLINICA NINARE', address: 'Rua das Flores, 123', phone: '(11) 9999-8888', responsible: 'Dr. Silva', status: 'Ativa' },
   { id: '2', name: 'CLINICA NINHO', address: 'Av. Paulista, 1000', phone: '(11) 3333-4444', responsible: 'Dra. Ana', status: 'Ativa' },
@@ -28,17 +29,6 @@ const INITIAL_SECTORS: Sector[] = [
   { id: 's6', name: 'TI', unitId: '1', status: 'Ativo' },
 ];
 
-const INITIAL_USERS: User[] = [
-  { id: 'u1', name: 'Admin Silva', email: 'admin@helpdesk.com', role: Role.ADMIN, unitId: '1', isOnline: true },
-  { id: 'u2', name: 'João Usuário', email: 'joao@empresa.com', role: Role.USER, unitId: '1', isOnline: true },
-  { id: 'u3', name: 'Maria Souza', email: 'maria@empresa.com', role: Role.USER, unitId: '2', isOnline: false },
-];
-
-const INITIAL_REMOTE: RemoteAccess[] = [
-  { id: 'r1', name: 'PC Recepção', type: 'ANYDESK', accessId: '123 456 789', password: 'abc123', unitId: '1', status: 'Online' },
-  { id: 'r2', name: 'Servidor Principal', type: 'RDP', accessId: '192.168.1.100', password: 'StrongPassword!', unitId: '1', status: 'Online' },
-];
-
 const INITIAL_ASSETS: Asset[] = [
   { id: 'a1', name: 'PC-001', patrimonyId: 'PAT-0001', category: 'Computador', status: 'Ativo', unitId: '1', description: 'Dell OptiPlex 3080', brand: 'Dell', model: 'OptiPlex 3080', serialNumber: 'CN12345', sectorId: 's5', acquisitionDate: '2023-01-15', value: 3500 },
   { id: 'a2', name: 'NB-001', patrimonyId: 'PAT-0002', category: 'Notebook', status: 'Ativo', unitId: '1', description: 'Lenovo ThinkPad E14', brand: 'Lenovo', model: 'ThinkPad E14', serialNumber: 'LN54321', sectorId: 's5', acquisitionDate: '2023-03-20', value: 4200 },
@@ -51,26 +41,29 @@ const INITIAL_PROBLEMS: CommonProblem[] = [
   { id: 'p3', title: 'Computador Lento', description: 'Sistema operacional demorando para responder.', priority: TicketPriority.MEDIUM, category: 'Hardware' },
 ];
 
-const INITIAL_TICKETS: Ticket[] = [
-  { id: 't1', title: 'Erro no ERP', description: 'Não consigo lançar nota fiscal.', status: TicketStatus.OPEN, priority: TicketPriority.HIGH, requesterId: 'u2', unitId: '1', category: 'Software', createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: new Date(Date.now() - 86400000).toISOString() },
-  { id: 't2', title: 'Solicitação de Mouse', description: 'Mouse parou de funcionar.', status: TicketStatus.CLOSED, priority: TicketPriority.LOW, requesterId: 'u3', unitId: '2', category: 'Hardware', createdAt: new Date(Date.now() - 172800000).toISOString(), updatedAt: new Date(Date.now() - 86400000).toISOString() },
+const INITIAL_REMOTE: RemoteAccess[] = [
+    { id: 'r1', name: 'PC Recepção', type: 'ANYDESK', accessId: '123 456 789', password: 'abc123', unitId: '1', status: 'Online' },
+    { id: 'r2', name: 'Servidor Principal', type: 'RDP', accessId: '192.168.1.100', password: 'StrongPassword!', unitId: '1', status: 'Online' },
 ];
+
 
 // --- APP COMPONENT ---
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [session, setSession] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(false);
   
-  // Auto-detect system preference
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
+  // Auth Form State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState('');
 
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  // Data State
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [users, setUsers] = useState<User[]>([]); // Will load profiles
   const [units, setUnits] = useState<Unit[]>(INITIAL_UNITS);
   const [sectors, setSectors] = useState<Sector[]>(INITIAL_SECTORS);
   const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
@@ -79,31 +72,211 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
+  // Auto-detect system preference
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [darkMode]);
 
-  const handleLogin = (role: Role) => {
-    const user = users.find(u => u.role === role);
-    if (user) setCurrentUser(user);
+  // Check active session
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchUserProfile(session.user.id);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        fetchUserProfile(session.user.id);
+      } else {
+        setCurrentUser(null);
+        setTickets([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch data when user is logged in
+  useEffect(() => {
+    if (currentUser) {
+        fetchTickets();
+        fetchUsers(); // For Admin
+    }
+  }, [currentUser]);
+
+  const fetchUserProfile = async (userId: string) => {
+    try {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        if (error) throw error;
+        if (data) {
+            setCurrentUser({
+                id: data.id,
+                name: data.name || 'Usuário',
+                email: data.email,
+                role: data.role as Role,
+                unitId: data.unit_id
+            });
+        }
+    } catch (error) {
+        console.error("Error fetching profile:", error);
+    }
   };
 
-  const handleLogout = () => setCurrentUser(null);
+  const fetchTickets = async () => {
+      try {
+          // If admin, fetch all. If user, fetch own.
+          // RLS policies in Supabase handle security, but we can filter here too for performance or UI.
+          let query = supabase.from('tickets').select('*').order('created_at', { ascending: false });
+          
+          if (currentUser?.role !== Role.ADMIN) {
+             query = query.eq('requester_id', currentUser?.id);
+          }
 
-  const addTicket = (ticket: Ticket) => {
-    setTickets(prev => [ticket, ...prev]);
-    if (currentUser?.role === Role.ADMIN) playNotificationSound();
-    else setTimeout(() => playNotificationSound(), 500); 
+          const { data, error } = await query;
+          if (error) throw error;
+          
+          if (data) {
+              const formattedTickets: Ticket[] = data.map((t: any) => ({
+                  id: t.id,
+                  title: t.title,
+                  description: t.description,
+                  status: t.status,
+                  priority: t.priority,
+                  requesterId: t.requester_id,
+                  unitId: t.unit_id,
+                  category: t.category,
+                  createdAt: t.created_at,
+                  updatedAt: t.updated_at,
+                  attachmentName: t.attachment_name
+              }));
+              setTickets(formattedTickets);
+          }
+      } catch (error) {
+          console.error("Error fetching tickets", error);
+      }
   };
 
-  const updateTicket = (updatedTicket: Ticket) => {
-    setTickets(prev => prev.map(t => t.id === updatedTicket.id ? updatedTicket : t));
+  const fetchUsers = async () => {
+      if (currentUser?.role !== Role.ADMIN) return;
+      const { data } = await supabase.from('profiles').select('*');
+      if (data) {
+          const formattedUsers: User[] = data.map((u: any) => ({
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              role: u.role,
+              unitId: u.unit_id
+          }));
+          setUsers(formattedUsers);
+      }
   };
 
-  const deleteTicket = (id: string) => {
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+        if (isSignUp) {
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: {
+                        name: fullName,
+                    }
+                }
+            });
+            if (error) throw error;
+            alert("Cadastro realizado! Você já pode fazer login.");
+            setIsSignUp(false);
+        } else {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+            if (error) throw error;
+        }
+    } catch (error: any) {
+        setAuthError(error.message || "Erro na autenticação");
+    } finally {
+        setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+  };
+
+  const addTicket = async (ticket: Ticket) => {
+    try {
+        const { data, error } = await supabase.from('tickets').insert([{
+            title: ticket.title,
+            description: ticket.description,
+            status: ticket.status,
+            priority: ticket.priority,
+            requester_id: currentUser?.id,
+            unit_id: ticket.unitId,
+            category: ticket.category,
+            sector: ticket.sector,
+            attachment_name: ticket.attachmentName
+        }]).select();
+
+        if (error) throw error;
+
+        if (data) {
+            const newTicket = { ...ticket, id: data[0].id, createdAt: data[0].created_at, updatedAt: data[0].updated_at };
+            setTickets(prev => [newTicket, ...prev]);
+            
+            if (currentUser?.role === Role.ADMIN) playNotificationSound();
+            else setTimeout(() => playNotificationSound(), 500); 
+        }
+    } catch (error) {
+        console.error("Error creating ticket:", error);
+        alert("Erro ao criar chamado.");
+    }
+  };
+
+  const updateTicket = async (updatedTicket: Ticket) => {
+    try {
+        const { error } = await supabase
+            .from('tickets')
+            .update({ status: updatedTicket.status, updated_at: new Date() })
+            .eq('id', updatedTicket.id);
+
+        if (error) throw error;
+        setTickets(prev => prev.map(t => t.id === updatedTicket.id ? updatedTicket : t));
+    } catch (error) {
+        console.error("Error updating ticket", error);
+    }
+  };
+
+  const deleteTicket = async (id: string) => {
     if (window.confirm("Tem certeza que deseja excluir esta OS?")) {
-      setTickets(prev => prev.filter(t => t.id !== id));
+      try {
+          const { error } = await supabase.from('tickets').delete().eq('id', id);
+          if (error) throw error;
+          setTickets(prev => prev.filter(t => t.id !== id));
+      } catch (error) {
+          console.error("Error deleting ticket", error);
+      }
     }
   };
 
@@ -118,45 +291,81 @@ export default function App() {
   if (!currentUser) {
     return (
       <div className="relative min-h-screen flex items-center justify-center bg-gray-900 overflow-hidden font-sans">
-        {/* Background Image - Server Room with Technician */}
+        {/* Background Image */}
         <div 
           className="absolute inset-0 z-0 bg-cover bg-center"
           style={{ backgroundImage: 'url("https://images.unsplash.com/photo-1573164713714-d95e436ab8d6?q=80&w=2669&auto=format&fit=crop")' }}
         ></div>
-        {/* Gradient Overlay for better text visibility */}
         <div className="absolute inset-0 z-0 bg-gradient-to-tr from-gray-900/95 via-gray-900/80 to-primary-900/50"></div>
 
-        {/* Admin Settings Button */}
-        <div className="absolute top-6 right-6 z-20">
-          <button 
-            onClick={() => handleLogin(Role.ADMIN)} 
-            className="text-white/60 hover:text-white hover:bg-white/10 p-3 rounded-full transition-all duration-300 transform hover:rotate-90 hover:scale-110"
-            title="Acesso Administrativo"
-          >
-            <Settings size={28} />
-          </button>
-        </div>
+        {/* Login/Register Card */}
+        <div className="relative z-10 w-full max-w-md p-6 mx-4">
+          <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-2xl flex flex-col items-center animate-fade-in-up">
+            <div className="w-16 h-16 bg-primary-600 rounded-2xl flex items-center justify-center shadow-lg transform -rotate-3 mb-6 ring-4 ring-primary-600/30">
+              <ShieldCheck size={36} className="text-white" />
+            </div>
+            
+            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">HelpDesk Pro</h1>
+            <p className="text-gray-300 mb-6 text-sm">{isSignUp ? "Crie sua conta para acessar" : "Entre para gerenciar seus chamados"}</p>
+            
+            <form onSubmit={handleAuth} className="w-full space-y-4">
+              {isSignUp && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-300 mb-1 ml-1">NOME COMPLETO</label>
+                    <input 
+                        type="text" 
+                        className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                        placeholder="Seu nome"
+                        value={fullName}
+                        onChange={e => setFullName(e.target.value)}
+                        required={isSignUp}
+                    />
+                  </div>
+              )}
+              
+              <div>
+                <label className="block text-xs font-bold text-gray-300 mb-1 ml-1">EMAIL</label>
+                <input 
+                    type="email" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                    placeholder="seu@email.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-gray-300 mb-1 ml-1">SENHA</label>
+                <input 
+                    type="password" 
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                />
+              </div>
 
-        {/* Login Card */}
-        <div className="relative z-10 w-full max-w-md p-8 mx-4">
-          <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-2xl flex flex-col items-center text-center animate-fade-in-up">
-            <div className="w-20 h-20 bg-primary-600 rounded-2xl flex items-center justify-center shadow-lg transform -rotate-3 mb-6 ring-4 ring-primary-600/30">
-              <ShieldCheck size={48} className="text-white" />
-            </div>
-            
-            <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">HelpDesk Pro</h1>
-            <p className="text-gray-300 mb-8 text-lg font-light">Sistema de Gestão de TI</p>
-            
-            <div className="w-full space-y-4">
+              {authError && <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-200 text-sm flex items-center gap-2"><AlertCircle size={16}/> {authError}</div>}
+
               <button 
-                onClick={() => handleLogin(Role.USER)} 
-                className="w-full bg-white text-gray-900 py-4 rounded-xl font-bold text-lg hover:bg-gray-50 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-3 group"
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-white text-gray-900 py-3.5 rounded-xl font-bold text-lg hover:bg-gray-50 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-3 mt-4 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                <span className="group-hover:text-primary-600 transition-colors">Entrar como Usuário</span>
+                {authLoading ? <Loader2 className="animate-spin"/> : (isSignUp ? "Criar Conta" : "Entrar no Sistema")}
               </button>
+            </form>
+
+            <div className="mt-6 flex items-center gap-2 text-sm text-gray-300">
+                <span>{isSignUp ? "Já tem uma conta?" : "Não tem uma conta?"}</span>
+                <button onClick={() => {setIsSignUp(!isSignUp); setAuthError('');}} className="text-white font-bold hover:underline">
+                    {isSignUp ? "Fazer Login" : "Cadastre-se"}
+                </button>
             </div>
             
-            <p className="mt-8 text-xs text-gray-400 font-medium">Versão 2.4.0 • HelpDesk System</p>
+            <p className="mt-8 text-xs text-gray-500 font-medium">Versão 2.5.0 • HelpDesk System</p>
           </div>
         </div>
       </div>
@@ -231,18 +440,17 @@ const SearchBar = ({ placeholder, onSearch }: { placeholder: string, onSearch: (
 
 const UserManager = ({ users, setUsers, units }: any) => {
   const [search, setSearch] = useState('');
-  const filteredUsers = users.filter((u: User) => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()));
+  // Only filtering local state for display, assuming users are passed in prop
+  const filteredUsers = users.filter((u: User) => u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
            <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Gerenciar Usuários</h1>
-           <p className="text-gray-500 dark:text-gray-400 text-sm">Controle de acesso e permissões</p>
+           <p className="text-gray-500 dark:text-gray-400 text-sm">Controle de acesso e permissões (Baseado no Supabase Auth)</p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
-          <Plus size={20} /> Novo Usuário
-        </button>
+        {/* Supabase user creation is usually done via Invite or Sign up, so simple button might redirect or show instructions */}
       </div>
       <div className="card p-4">
         <SearchBar placeholder="Buscar por nome ou email..." onSearch={setSearch} />
@@ -263,7 +471,7 @@ const UserManager = ({ users, setUsers, units }: any) => {
               <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                 <td className="p-4 font-medium flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary-500 to-indigo-600 text-white flex items-center justify-center font-bold shadow-sm">
-                    {u.name.charAt(0)}
+                    {u.name?.charAt(0) || 'U'}
                   </div>
                   <span className="text-gray-900 dark:text-gray-100">{u.name}</span>
                 </td>
@@ -272,7 +480,6 @@ const UserManager = ({ users, setUsers, units }: any) => {
                 <td className="p-4 text-gray-600 dark:text-gray-300">{units.find((un:Unit) => un.id === u.unitId)?.name || '-'}</td>
                 <td className="p-4 flex gap-2">
                   <button className="btn-icon text-blue-500 hover:text-blue-600 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40"><Edit2 size={18} /></button>
-                  <button className="btn-icon text-red-500 hover:text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40"><Trash2 size={18} /></button>
                 </td>
               </tr>
             ))}
@@ -796,7 +1003,7 @@ const CreateTicket = ({ currentUser, units, sectors, problems, addTicket, assets
     if(!unitId) return alert("Selecione a Unidade");
     
     addTicket({
-      id: Math.random().toString(36).substr(2, 9),
+      // ID generated by Supabase
       title: formData.title,
       description: formData.description,
       priority: TicketPriority.MEDIUM,
@@ -805,12 +1012,10 @@ const CreateTicket = ({ currentUser, units, sectors, problems, addTicket, assets
       sector: sectors.find((s:Sector) => s.id === sectorId)?.name,
       requesterId: currentUser.id,
       category: 'Geral',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       attachmentName: fileName,
       ...formData
     });
-    alert("Chamado criado com sucesso!");
+    alert("Chamado sendo criado...");
     setFormData({});
     setFileName('');
   };
@@ -906,7 +1111,7 @@ const TicketManager = ({ tickets, updateTicket, addTicket, deleteTicket, current
   const handleStatusChange = (id: string, newStatus: TicketStatus) => {
     const ticket = tickets.find((t: Ticket) => t.id === id);
     if (ticket) {
-        updateTicket({ ...ticket, status: newStatus, updatedAt: new Date().toISOString() });
+        updateTicket({ ...ticket, status: newStatus });
     }
   };
 
@@ -974,15 +1179,13 @@ const TicketManager = ({ tickets, updateTicket, addTicket, deleteTicket, current
                   <p className="mb-4 text-gray-600 dark:text-gray-300">Criação rápida de chamado administrativo.</p>
                   <button onClick={() => {
                       addTicket({
-                          id: Math.random().toString(36).substr(2,9),
                           title: 'Nova OS Avulsa',
                           description: 'Criada pelo admin',
                           status: TicketStatus.OPEN,
                           priority: TicketPriority.MEDIUM,
                           requesterId: currentUser.id,
                           unitId: currentUser.unitId || '1',
-                          createdAt: new Date().toISOString(),
-                          updatedAt: new Date().toISOString()
+                          category: 'Geral'
                       });
                       setShowCreate(false);
                   }} className="btn-primary w-full">Confirmar Criação</button>
@@ -1107,7 +1310,7 @@ const Header = ({ user, darkMode, toggleDarkMode }: any) => {
     <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md shadow-sm z-10 py-4 px-8 flex justify-between items-center sticky top-0 border-b border-gray-100 dark:border-gray-800">
       <div className="flex items-center md:ml-0 ml-12">
         <h2 className="text-xl font-bold text-gray-800 dark:text-white tracking-tight">
-          Olá, <span className="text-primary-600 dark:text-primary-400">{user.name.split(' ')[0]}</span>
+          Olá, <span className="text-primary-600 dark:text-primary-400">{user.name?.split(' ')[0]}</span>
         </h2>
       </div>
       <div className="flex items-center space-x-4">
@@ -1120,7 +1323,7 @@ const Header = ({ user, darkMode, toggleDarkMode }: any) => {
               <p className="text-xs text-gray-500 dark:text-gray-400">{user.role === 'ADMIN' ? 'Administrador' : 'Usuário'}</p>
            </div>
            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md transform hover:scale-105 transition-transform cursor-pointer">
-             {user.name.charAt(0)}
+             {user.name?.charAt(0) || 'U'}
            </div>
         </div>
       </div>
